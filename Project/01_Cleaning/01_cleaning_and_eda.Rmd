@@ -1,0 +1,295 @@
+---
+title: "Danish Villa Prices: Data Cleaning and EDA"
+author: "Carlos Castillo (ID: 202505985)"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Motivation
+
+I'm a Data Science student at Aarhus University who dreams about buying a villa in the Copenhagen area after graduation. But first, I want to understand what drives villa prices in the current Danish market and build a statistical modelb capable of predicting the price of a specific property given its
+characteristics.
+
+The dataset used is a random sample of 100,000 residential transactions from Denmark between 1992 and 2024, obtained from publicly available records on Boliga.dk and merged with macroeconomic data from Danmarks Statistik and Finans Danmark.
+
+---
+
+# First Glimpse
+
+We begin by loading the data and examining its structure.
+
+```{r load}
+dk <- read.csv("../../data/DKHousingPricesSample100k.csv")
+
+dim(dk)
+glimpse(dk)
+```
+
+```{r missing}
+# Missing values per column
+colSums(is.na(dk))
+
+# Empty strings — common artefact of web scraping
+colSums(dk == "" | dk == "-", na.rm = TRUE)
+```
+
+```{r summaries}
+# Numeric columns
+summary(dk[, c("purchase_price", "sqm", "no_rooms", "year_build")])
+
+# Categorical columns
+table(dk$house_type)
+table(dk$sales_type)
+table(dk$area)
+```
+
+---
+
+# Why Cleaning Is Necessary
+
+The dataset was obtained by web scraping publicly available Danish housing records and merging them with macroeconomic time series. While the data has been partially cleaned by the original author, several issues remain that must be addressed before any statistical modelling.
+
+**Missing values.** The columns `dk_ann_infl_rate` and
+`yield_on_mortgage_credit_bonds` contain 77 missing values, corresponding to the most recent quarters for which macroeconomic data has not yet been published. Rows with missing values in predictor variables must be removed, as regression models cannot handle them directly.
+
+**Empty strings.** The `city` column contains 11 blank entries, a common artefact of web scraping where a field was present in the HTML but empty. These are not informative and are treated as missing.
+
+**Implausible values.** The `year_build` column has a minimum of 1000,
+which is clearly a data entry error — no residential house in the dataset would credibly date to medieval times. We restrict to houses built in 1850 or later, which is a conservative and justifiable lower bound for
+the Danish residential housing market.
+
+**Non-market sales.** The `sales_type` column includes auctions, family sales, and other non-standard transactions. These sale types are known to produce prices that deviate systematically from open-market values (family sales in particular are often below market price by design). We restrict the analysis to `regular_sale` to ensure that prices reflect
+actual market conditions.
+
+**Extreme values.** The `sqm` column has a maximum of 984 m², and
+`purchase_price` reaches nearly 46 million DKK. These extreme observations are predominantly farms and luxury estates that follow different pricing dynamics from the general residential market. We apply conservative bounds (20–500 m² and 200,000–20,000,000 DKK) to focus on the main market.
+
+**House type: Farm.** Farms are excluded because they combine residential and agricultural land value, making their price per square metre incomparable with purely residential properties.
+
+---
+
+# Exploratory Data Analysis — Raw Data
+
+Before any transformation, we examine the raw distributions of the key
+variables to understand their shape and assess whether the assumptions
+of a linear model are plausible on the original scale.
+
+## Distribution of purchase price
+
+```{r raw-price-hist}
+hist(dk$purchase_price,
+     breaks = 80,
+     main   = "Purchase Price — Raw",
+     xlab   = "Purchase Price (DKK)",
+     col    = "lightsteelblue",
+     border = "white")
+```
+
+```{r raw-price-qq}
+qqnorm(dk$purchase_price,
+       main = "QQ Plot — Purchase Price (raw)",
+       pch  = 16, cex = 0.3, col = "steelblue")
+qqline(dk$purchase_price, col = "firebrick", lwd = 2)
+```
+
+## Distribution of square metres
+
+```{r raw-sqm-hist}
+hist(dk$sqm,
+     breaks = 80,
+     main   = "Square Metres — Raw",
+     xlab   = "sqm",
+     col    = "lightsteelblue",
+     border = "white")
+```
+
+```{r raw-sqm-qq}
+qqnorm(dk$sqm,
+       main = "QQ Plot — Square Metres (raw)",
+       pch  = 16, cex = 0.3, col = "steelblue")
+qqline(dk$sqm, col = "firebrick", lwd = 2)
+```
+
+**Comment:** Both distributions are strongly right-skewed, the histograms show a long right tail and the QQ plots deviate sharply from the diagonal in the upper quantiles. These patterns are typical of price and size data and suggest that a linear model on the raw scale would violate the normality and constant-variance assumptions of the Linear Normal Model.
+
+---
+
+# Log Transformation
+
+The observations above motivate a log transformation of both
+`purchase_price` and `sqm`. Taking logarithms of right-skewed,positive
+variables typically:
+
+- Symmetrises the distribution, bringing it closer to normality
+- Stabilises the variance (addresses heteroscedasticity)
+- Makes the relationship between price and size more linear
+- Gives regression coefficients a natural interpretation as
+  **elasticities**: a 1% increase in sqm is associated with a
+  $\hat\beta$\% increase in price
+
+We now compare the raw and log-transformed distributions side by side.
+
+## Purchase price: raw vs. log
+
+```{r compare-price, fig.width=10, fig.height=4}
+par(mfrow = c(1, 2))
+
+hist(dk$purchase_price,
+     breaks = 80, prob = TRUE,
+     main   = "Price — Raw",
+     xlab   = "DKK",
+     col    = "lightsteelblue", border = "white")
+
+hist(log(dk$purchase_price),
+     breaks = 80, prob = TRUE,
+     main   = "log(Price)",
+     xlab   = "log(DKK)",
+     col    = "lightcoral", border = "white")
+curve(dnorm(x, mean(log(dk$purchase_price)), sd(log(dk$purchase_price))),
+      add = TRUE, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+## Square metres: raw vs. log
+
+```{r compare-sqm, fig.width=10, fig.height=4}
+par(mfrow = c(1, 2))
+
+hist(dk$sqm,
+     breaks = 80, prob = TRUE,
+     main   = "sqm — Raw",
+     xlab   = "sqm",
+     col    = "lightsteelblue", border = "white")
+
+hist(log(dk$sqm),
+     breaks = 80, prob = TRUE,
+     main   = "log(sqm)",
+     xlab   = "log(sqm)",
+     col    = "lightcoral", border = "white")
+curve(dnorm(x, mean(log(dk$sqm)), sd(log(dk$sqm))),
+      add = TRUE, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+## QQ plots: raw vs. log
+
+```{r compare-qq, fig.width=10, fig.height=4}
+par(mfrow = c(1, 2))
+qqnorm(dk$purchase_price,
+       main = "QQ — Price (raw)",
+       pch = 16, cex = 0.3, col = "steelblue")
+qqline(dk$purchase_price, col = "firebrick", lwd = 2)
+
+qqnorm(log(dk$purchase_price),
+       main = "QQ — log(Price)",
+       pch = 16, cex = 0.3, col = "steelblue")
+qqline(log(dk$purchase_price), col = "firebrick", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+**Conclusion:** The log-transformed distributions are substantially more symmetric and closer to normal, as confirmed by both the histograms and the QQ plots. We therefore adopt $\log(\text{price})$ as the response variable and $\log(\text{sqm})$ as the primary continuous predictor for all subsequent modelling.
+
+---
+
+# Applying the General Cleaning
+
+Based on the diagnostic checks above, we now apply the cleaning steps
+motivated in Section 3.
+
+```{r clean}
+dk_clean <- dk %>%
+  filter(sales_type == "regular_sale") %>%
+  filter(!is.na(dk_ann_infl_rate.) & !is.na(yield_on_mortgage_credit_bonds.)) %>%
+  filter(city != "" & city != "-") %>%
+  filter(year_build >= 1850) %>%
+  filter(house_type %in% c("Villa", "Apartment", "Townhouse", "Summerhouse")) %>%
+  filter(sqm >= 20 & sqm <= 500) %>%
+  filter(purchase_price >= 200000 & purchase_price <= 20000000) %>%
+  mutate(
+    log_price  = log(purchase_price),
+    log_sqm    = log(sqm),
+    house_age  = 2024 - year_build,
+    house_type = as.factor(house_type),
+    area       = as.factor(area),
+    region     = as.factor(region)
+  )
+
+cat("Rows before cleaning:", nrow(dk),       "\n")
+cat("Rows after cleaning: ", nrow(dk_clean), "\n")
+cat("Rows removed:        ", nrow(dk) - nrow(dk_clean), "\n")
+```
+
+---
+
+# Final Analysis Dataset
+
+The full cleaned dataset contains approximately 80,000 transactions
+across all house types, regions, and years. For the purpose of this
+analysis we apply four additional filters motivated by the research
+question.
+
+**House type — Villa only.** We are interested in purchasing a villa,
+so all other property types (Apartment, Townhouse, Summerhouse) are
+excluded.
+
+**Area — Capital, Copenhagen.** Having studied in Aarhus, we plan to
+settle in the Copenhagen area after graduation. We therefore restrict
+to transactions within this area, which reflects the market we will
+actually face as buyers.
+
+**Year — 2023 and 2024.** The Danish housing market has undergone
+structural shifts — a financial crisis in 2008, a pandemic shock in
+2020, and a sharp interest rate hiking cycle in 2022–2023. Older
+transactions reflect market conditions that no longer apply. We
+restrict to 2023–2024 to ensure the model is trained on data
+representative of the current market.
+
+**Budget — 2,500,000 to 8,000,000 DKK.** As a first-time buyer,
+transactions below 2.5M DKK likely represent distressed or atypical
+properties, while transactions above 8M DKK are luxury estates outside
+a realistic purchase range. This bracket covers the 5th to 88th
+percentile of the villa price distribution in this area.
+
+```{r villa}
+dk_villa <- dk_clean %>%
+  mutate(year = as.integer(substr(date, 1, 4))) %>%
+  filter(house_type == "Villa",
+    area       == "Capital, Copenhagen",
+         year       >= 2023,
+         purchase_price >= 2500000,
+         purchase_price <= 8000000)
+
+cat("Final dataset rows:", nrow(dk_villa), "\n\n")
+
+summary(dk_villa[, c("purchase_price", "log_price",
+                     "log_sqm", "house_age",
+                     "no_rooms", "nom_interest_rate.",
+                     "dk_ann_infl_rate.")])
+```
+
+---
+
+# Save
+
+```{r save}
+saveRDS(dk_clean, "../../data/dk_clean.rds")
+saveRDS(dk_villa, "../../data/dk_villa.rds")
+```
