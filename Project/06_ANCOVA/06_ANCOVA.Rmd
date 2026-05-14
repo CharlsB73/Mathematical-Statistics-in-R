@@ -1,0 +1,226 @@
+---
+title: "Step 5: Comparison of Regression Lines (ANCOVA)"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4.5, fig.width = 8)
+```
+
+```{r load}
+#| results: hold
+
+
+library(tidyverse)
+dk_clean <- readRDS("../../data/dk_clean.rds")
+
+types  <- levels(dk_clean$house_type)
+colors <- c("steelblue","firebrick","forestgreen","darkorange")
+
+cat("House types:", types, "\n")
+cat("n =", nrow(dk_clean), "\n")
+```
+
+---
+
+# Question
+
+Does $\log(\text{sqm})$ have the **same slope** for all house types, or does
+each type scale differently with size?
+
+---
+
+# Three-Model Hierarchy
+
+Let $t_i = \log(\text{sqm}_i)$ and let $j(i)$ denote the house type of
+observation $i$:
+
+**M1** (separate intercepts and slopes):
+$$Y_i \sim \mathcal{N}(\alpha_{j(i)} + \beta_{j(i)}\, t_i,\; \sigma^2)$$
+
+**M2** (separate intercepts, common slope — ANCOVA):
+$$Y_i \sim \mathcal{N}(\alpha_{j(i)} + \beta\, t_i,\; \sigma^2)$$
+
+**M3** (single regression line):
+$$Y_i \sim \mathcal{N}(\alpha + \beta\, t_i,\; \sigma^2)$$
+
+---
+
+# Variance Homogeneity: Bartlett's Test on Residuals
+
+**Why residuals, not the raw response?**
+Under a regression model, variation in $Y$ is partly explained by $t_i$.
+Testing on raw $Y$ would confound structural variance with regression signal.
+The slides (§8) show the correct syntax: pass the **fitted `lm` objects**
+directly to `bartlett.test`. R then uses the residual variance estimates
+$s_{(i)}^2 \sim \sigma_i^2 \chi^2(n_i-2)/(n_i-2)$.
+
+$$H_{0\sigma^2}: \sigma_{\text{Apt}}^2 = \sigma_{\text{Sum}}^2
+= \sigma_{\text{Town}}^2 = \sigma_{\text{Villa}}^2$$
+
+```{r bartlett-residuals}
+#| results: hold
+
+
+# Fit separate regression within each house type (= the M1 model)
+fits_list <- split(dk_clean, dk_clean$house_type)
+fits_list <- lapply(fits_list, function(d) lm(log_price ~ log_sqm, data = d))
+
+cat("Residual SDs from group-specific regressions:\n")
+for (tp in types) {
+  cat(" ", tp, ":", round(summary(fits_list[[tp]])$sigma, 4), "\n")
+}
+
+cat("\nMax / Min residual SD ratio:",
+    round(max(sapply(fits_list, function(f) summary(f)$sigma)) /
+          min(sapply(fits_list, function(f) summary(f)$sigma)), 2), "\n\n")
+
+# Correct call: pass lm objects, not raw response
+cat("--- Bartlett's test (on regression residuals) ---\n")
+bartlett.test(fits_list)
+```
+
+---
+
+# Exploratory Plot: Separate Regression Lines
+
+```{r scatter-lines}
+#| results: hold
+
+
+plot(dk_clean$log_sqm, dk_clean$log_price,
+     pch = 16, cex = 0.08, col = rgb(0, 0, 0, 0.07),
+     main = "log(Price) vs log(sqm) by House Type",
+     xlab = "log(sqm)", ylab = "log(Price)")
+
+for (j in seq_along(types)) {
+  abline(fits_list[[types[j]]], col = colors[j], lwd = 2)
+}
+legend("topleft", legend = types, col = colors,
+       lwd = 2, bty = "n", cex = 0.8)
+```
+
+---
+
+# Model Tests
+
+## Test 1: Common slope? (M2 vs M1)
+
+$$H_0: \beta_1 = \beta_2 = \beta_3 = \beta_4 = \beta$$
+
+```{r m1-m2}
+#| results: hold
+
+
+M1_reg <- lm(log_price ~ house_type * log_sqm, data = dk_clean)
+M2_reg <- lm(log_price ~ house_type + log_sqm, data = dk_clean)
+
+cat("--- F-test: M2 vs M1 (common slope) ---\n")
+anova(M2_reg, M1_reg)
+
+cat("\ns(M1) =", round(summary(M1_reg)$sigma, 5), "\n")
+cat("s(M2) =", round(summary(M2_reg)$sigma, 5), "\n")
+```
+
+## Test 2: No house type effect? (M3 vs M2)
+
+$$H_0: \alpha_1 = \alpha_2 = \alpha_3 = \alpha_4$$
+
+```{r m2-m3}
+#| results: hold
+
+
+M3_reg <- lm(log_price ~ log_sqm, data = dk_clean)
+
+cat("--- F-test: M3 vs M2 (no type effect) ---\n")
+anova(M3_reg, M2_reg)
+
+cat("\ns(M3) =", round(summary(M3_reg)$sigma, 5), "\n")
+```
+
+---
+
+# Slope Estimates per House Type
+
+Using the no-intercept parameterisation to obtain individual slope estimates:
+
+```{r slopes}
+#| results: hold
+
+
+M1_slopes <- lm(log_price ~ 0 + house_type + house_type:log_sqm,
+                data = dk_clean)
+
+cf <- summary(M1_slopes)$coefficients
+slope_rows <- grep(":log_sqm", rownames(cf))
+
+cat("Slope estimates (beta_j) with 95% CIs:\n\n")
+slopes_ci <- confint(M1_slopes)[slope_rows, ]
+slopes_est <- cf[slope_rows, c("Estimate","Std. Error","t value","Pr(>|t|)")]
+
+print(round(slopes_est, 4))
+cat("\n95% CIs for slopes:\n")
+print(round(slopes_ci, 4))
+```
+
+---
+
+# ANCOVA Model (M2): Summary
+
+If the common-slope test is not rejected, M2 is the working model.
+It gives a single slope $\hat\beta$ (shared price-size elasticity) and
+separate intercepts per house type (price-level differences).
+
+```{r m2-summary}
+#| results: hold
+
+
+summary(M2_reg)
+cat("\nInterpretation of slope: a 1% increase in sqm is associated with\n")
+cat("a", round(summary(M2_reg)$coefficients["log_sqm","Estimate"] * 100, 2),
+    "basis-point increase in log-price (approx",
+    round(summary(M2_reg)$coefficients["log_sqm","Estimate"], 3),
+    "% increase in price).\n")
+```
+
+---
+
+# Residual Diagnostics: M2
+
+```{r diag-m2}
+#| results: hold
+
+
+par(mfrow = c(1, 2))
+
+res_m2 <- rstandard(M2_reg)
+
+plot(fitted(M2_reg), res_m2,
+     pch = 16, cex = 0.1, col = rgb(0,0,0.6,0.15),
+     main = "Residuals vs Fitted — M2",
+     xlab = "Fitted", ylab = "Std. residuals")
+abline(h =  0, lty = 1)
+abline(h =  2, lty = 2, col = "firebrick")
+abline(h = -2, lty = 2, col = "firebrick")
+
+qqnorm(res_m2, pch = 16, cex = 0.1, col = "steelblue",
+       main = "QQ — M2 residuals")
+qqline(res_m2, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```

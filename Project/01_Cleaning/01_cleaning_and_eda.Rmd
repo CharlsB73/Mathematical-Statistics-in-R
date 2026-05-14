@@ -23,8 +23,7 @@ library(tidyverse)
 
 # Motivation
 
-I'm a Data Science student at Aarhus University who dreams about buying a villa in the Copenhagen area after graduation. But first, I want to understand what drives villa prices in the current Danish market and build a statistical modelb capable of predicting the price of a specific property given its
-characteristics.
+I'm a Data Science student at Aarhus University who dreams about buying a villa in the Copenhagen area after graduation. But first, I want to understand what drives villa prices in the current Danish market and build a statistical model capable of predicting the price of a specific property given its characteristics.
 
 The dataset used is a random sample of 100,000 residential transactions from Denmark between 1992 and 2024, obtained from publicly available records on Boliga.dk and merged with macroeconomic data from Danmarks Statistik and Finans Danmark.
 
@@ -246,17 +245,17 @@ across all house types, regions, and years. For the purpose of this
 analysis we apply four additional filters motivated by the research
 question.
 
-**House type — Villa only.** We are interested in purchasing a villa,
+**House type — Villa only.** I'm only interested in purchasing a villa,
 so all other property types (Apartment, Townhouse, Summerhouse) are
 excluded.
 
-**Area — Capital, Copenhagen.** Having studied in Aarhus, we plan to
-settle in the Copenhagen area after graduation. We therefore restrict
+**Area — Capital, Copenhagen.** Having studied in Aarhus, I plan to
+settle in the Copenhagen area after graduation. I therefore restrict
 to transactions within this area, which reflects the market we will
 actually face as buyers.
 
 **Year — 2023 and 2024.** The Danish housing market has undergone
-structural shifts — a financial crisis in 2008, a pandemic shock in
+structural shifts, a financial crisis in 2008, a pandemic shock in
 2020, and a sharp interest rate hiking cycle in 2022–2023. Older
 transactions reflect market conditions that no longer apply. We
 restrict to 2023–2024 to ensure the model is trained on data

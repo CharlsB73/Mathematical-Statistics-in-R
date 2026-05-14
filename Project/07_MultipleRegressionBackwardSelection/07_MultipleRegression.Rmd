@@ -1,0 +1,268 @@
+---
+title: "Step 6: Multiple Regression with Backward Selection"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4, fig.width = 7)
+```
+
+```{r load}
+library(tidyverse)
+dk_villa <- readRDS("../../data/dk_villa.rds")
+cat("n =", nrow(dk_villa), "\n")
+```
+
+---
+
+# Statistical Model
+
+$$Y_i \sim \mathcal{N}\!\left(\alpha + \sum_{j=1}^d \beta_j\, t_{ij},\; \sigma^2\right),
+\quad i = 1, \ldots, n \quad \text{(independent)}$$
+
+with candidate regressors:
+`log_sqm`, `house_age`, `no_rooms`, `nom_interest_rate.`, `dk_ann_infl_rate.`
+
+---
+
+# Variance Homogeneity: Residuals Binned by Fitted Values
+
+With continuous predictors there are no natural groups. The primary
+diagnostic is the **residuals-vs-fitted plot**. A supplementary
+Bartlett test on quantile-based bins of fitted values is included as a
+formal check, but must be interpreted carefully given the arbitrary bin choice.
+
+## Full model first
+
+```{r full-model}
+#| results: hold
+
+
+M_start <- lm(log_price ~ log_sqm + house_age + no_rooms +
+                nom_interest_rate. + dk_ann_infl_rate.,
+              data = dk_villa)
+
+cat("--- Full model summary ---\n")
+summary(M_start)
+cat("\ns(M_start) =", round(summary(M_start)$sigma, 5), "\n")
+```
+
+## Residuals vs fitted: primary diagnostic
+
+```{r resid-vs-fitted}
+#| results: hold
+
+
+res_start <- rstandard(M_start)
+
+plot(fitted(M_start), res_start,
+     pch = 16, cex = 0.6, col = rgb(0, 0, 0.6, 0.4),
+     main = "Residuals vs Fitted — Full Model",
+     xlab = "Fitted (log scale)", ylab = "Standardised residuals")
+abline(h =  0, lty = 1)
+abline(h =  2, lty = 2, col = "firebrick")
+abline(h = -2, lty = 2, col = "firebrick")
+```
+
+## Bartlett on fitted-value bins: supplementary
+
+```{r bartlett-bins}
+#| results: hold
+
+
+dk_villa$fit_group <- cut(
+  fitted(M_start),
+  breaks          = quantile(fitted(M_start), probs = seq(0, 1, length.out = 7)),
+  include.lowest  = TRUE
+)
+
+cat("Observations per bin:\n")
+print(table(dk_villa$fit_group))
+
+cat("\nPer-bin residual SDs:\n")
+print(round(tapply(residuals(M_start), dk_villa$fit_group, sd), 4))
+
+cat("\n--- Bartlett test on fitted-value bins ---\n")
+bartlett.test(residuals(M_start) ~ dk_villa$fit_group)
+
+cat("\nThis is supplementary. The residual plot above is the primary check.\n")
+```
+
+---
+
+# Backward Selection
+
+## Algorithm (§5.6.1)
+
+1. Fit the full model; record $s(M)$.
+2. Find the predictor with the **largest p-value** among the t-tests
+   for $H_0: \beta_j = 0$.
+3. If that p-value $> 0.05$, remove it and refit.
+4. Repeat until all p-values $\leq 0.05$.
+5. The resulting model is the **final model**.
+6. Confirm with an F-test comparing full to final.
+
+```{r helpers}
+#| results: hold
+
+
+get_s         <- function(fit) round(summary(fit)$sigma, 5)
+get_maxp      <- function(fit) {
+  cf <- summary(fit)$coefficients[-1, , drop = FALSE]
+  max(cf[, "Pr(>|t|)"])
+}
+get_maxp_name <- function(fit) {
+  cf <- summary(fit)$coefficients[-1, , drop = FALSE]
+  rownames(cf)[which.max(cf[, "Pr(>|t|)"])]
+}
+```
+
+## Step 0: full model
+
+```{r step0}
+#| results: hold
+
+
+cat("=== Step 0 — full model ===\n")
+cf0 <- round(summary(M_start)$coefficients[, c("Estimate","Pr(>|t|)")], 5)
+print(cf0)
+cat("\nMax p-value:", round(get_maxp(M_start), 5),
+    "| Variable to drop:", get_maxp_name(M_start))
+cat("\ns(M_start) =", get_s(M_start), "\n")
+```
+
+## Step 1: drop highest p-value variable
+
+```{r step1}
+#| results: hold
+
+
+# Update formula after inspecting Step 0 output above
+M_b1 <- lm(log_price ~ log_sqm + house_age +
+              nom_interest_rate. + dk_ann_infl_rate.,
+            data = dk_villa)
+
+cat("=== Step 1 — after dropping no_rooms ===\n")
+cf1 <- round(summary(M_b1)$coefficients[, c("Estimate","Pr(>|t|)")], 5)
+print(cf1)
+cat("\nMax p-value:", round(get_maxp(M_b1), 5),
+    "| Variable to drop:", get_maxp_name(M_b1))
+cat("\ns(M_b1) =", get_s(M_b1), "\n")
+```
+
+## Step 2: check remaining p-values
+
+```{r step2}
+#| results: hold
+
+
+# Update if further reduction is indicated by Step 1 output
+M_b2 <- lm(log_price ~ log_sqm + house_age +
+              nom_interest_rate. + dk_ann_infl_rate.,
+            data = dk_villa)
+
+cat("=== Step 2 — check all p-values ===\n")
+cf2 <- round(summary(M_b2)$coefficients[, c("Estimate","Pr(>|t|)")], 5)
+print(cf2)
+cat("\nAll p-values < 0.05? Stop criterion met.\n")
+cat("s(M_final) =", get_s(M_b2), "\n")
+
+M_final <- M_b2
+```
+
+---
+
+# s(M) Tracking Table
+
+```{r sigma-track}
+#| results: hold
+
+
+sigma_track <- data.frame(
+  Step  = c("Step 0 (full)", "Step 1", "Step 2 (final)"),
+  Model = c("log_sqm + house_age + no_rooms + nom_rate + infl_rate",
+            "log_sqm + house_age + nom_rate + infl_rate",
+            "log_sqm + house_age + nom_rate + infl_rate"),
+  s_M   = c(get_s(M_start), get_s(M_b1), get_s(M_final))
+)
+knitr::kable(sigma_track, caption = "s(M) at each backward-selection step")
+```
+
+---
+
+# F-Test: Full Model vs Final Model
+
+```{r ftest}
+#| results: hold
+
+
+cat("--- F-test: M_final vs M_start ---\n")
+anova(M_final, M_start)
+
+cat("\nIf p > 0.05: the removed variables contribute nothing beyond noise.\n")
+cat("The reduction from full to final is justified.\n")
+```
+
+---
+
+# Final Model Summary and Diagnostics
+
+```{r final-summary}
+#| results: hold
+
+
+cat("--- Final model ---\n")
+summary(M_final)
+```
+
+```{r final-diag}
+#| results: hold
+
+
+par(mfrow = c(1, 3))
+
+res_f <- rstandard(M_final)
+
+plot(fitted(M_final), res_f,
+     pch = 16, cex = 0.6, col = rgb(0, 0, 0.6, 0.3),
+     main = "Residuals vs Fitted",
+     xlab = "Fitted", ylab = "Std. residuals")
+abline(h =  0, lty = 1)
+abline(h =  2, lty = 2, col = "firebrick")
+abline(h = -2, lty = 2, col = "firebrick")
+
+qqnorm(res_f, pch = 16, cex = 0.5, col = "steelblue",
+       main = "QQ Plot — Residuals")
+qqline(res_f, col = "firebrick", lwd = 2)
+
+plot(fitted(M_final), sqrt(abs(res_f)),
+     pch = 16, cex = 0.6, col = rgb(0, 0.4, 0, 0.3),
+     main = "Scale-Location",
+     xlab = "Fitted", ylab = expression(sqrt("|std. resid|")))
+abline(h = 1, lty = 2, col = "firebrick")
+
+par(mfrow = c(1, 1))
+```
+
+```{r save-final}
+#| results: hold
+
+
+saveRDS(M_final, "../../data/M_final.rds")
+cat("Final model saved to ../../data/M_final.rds\n")
+```

@@ -1,0 +1,236 @@
+---
+title: "Step 8: Prediction Intervals for New Houses"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4.5, fig.width = 8)
+```
+
+```{r load}
+#| results: hold
+
+
+library(tidyverse)
+dk_villa <- readRDS("../../data/dk_villa.rds")
+M_final  <- readRDS("../../data/M_final.rds")
+
+cat("Model formula:", deparse(formula(M_final)), "\n")
+cat("n =", nrow(dk_villa), "\n")
+cat("s =", round(summary(M_final)$sigma, 5), "\n")
+```
+
+---
+
+# Two Types of Interval 
+
+Both intervals share the same point estimate $\hat{\mu}(t_0) = \hat\alpha + \hat\beta^\top t_0$
+but differ in what uncertainty they capture:
+
+**Confidence interval for the mean** — uncertainty about where the
+true mean $\mu(t_0) = E[Y \mid t_0]$ lies:
+
+$$\hat\mu(t_0) \pm t_{0.975}(n-p) \cdot s \cdot \sqrt{t_0^\top (X^\top X)^{-1} t_0}$$
+
+**Prediction interval for a single new observation** — uncertainty about
+where one new $Y_0$ will fall, adding residual variance $\sigma^2$:
+
+$$\hat\mu(t_0) \pm t_{0.975}(n-p) \cdot s \cdot \sqrt{1 + t_0^\top (X^\top X)^{-1} t_0}$$
+
+The prediction interval is always wider than the confidence interval by the extra $1$ under the square root, reflecting irreducible observation noise.
+
+---
+
+# New Houses to Predict
+
+Three hypothetical Copenhagen Villas with characteristics representative of the 2023–2024 market:
+
+```{r new-houses}
+#| results: hold
+
+
+# Adjust predictor names to match the final model's terms exactly
+new_houses <- data.frame(
+  log_sqm            = log(c(100, 130, 180)),
+  house_age          = c(60,   50,   20),
+  nom_interest_rate. = c(3.5,  3.5,  3.5),
+  dk_ann_infl_rate.  = c(3.3,  3.3,  3.3)
+)
+
+new_houses$sqm <- exp(new_houses$log_sqm)
+print(new_houses)
+```
+
+---
+
+# Computing the Intervals
+
+```{r predict-intervals}
+#| results: hold
+
+
+ci_log <- predict(M_final, newdata = new_houses, interval = "confidence")
+pi_log <- predict(M_final, newdata = new_houses, interval = "prediction")
+
+sqm_labels <- c("100 sqm", "130 sqm", "180 sqm")
+
+cat("=== Confidence intervals for E[Price | t0] ===\n\n")
+for (i in 1:3) {
+  cat(sprintf("  %s:  point est = %s DKK\n",
+      sqm_labels[i],
+      format(round(exp(ci_log[i,"fit"])), big.mark = ",")))
+  cat(sprintf("         95%% CI = [%s – %s] DKK\n\n",
+      format(round(exp(ci_log[i,"lwr"])), big.mark = ","),
+      format(round(exp(ci_log[i,"upr"])), big.mark = ",")))
+}
+
+cat("=== Prediction intervals for a single new house ===\n\n")
+for (i in 1:3) {
+  cat(sprintf("  %s:  95%% PI = [%s – %s] DKK\n",
+      sqm_labels[i],
+      format(round(exp(pi_log[i,"lwr"])), big.mark = ","),
+      format(round(exp(pi_log[i,"upr"])), big.mark = ",")))
+}
+```
+
+---
+
+# Width Comparison
+
+```{r widths}
+#| results: hold
+
+
+ci_widths <- exp(ci_log[,"upr"]) - exp(ci_log[,"lwr"])
+pi_widths <- exp(pi_log[,"upr"]) - exp(pi_log[,"lwr"])
+
+width_tbl <- data.frame(
+  sqm          = c(100, 130, 180),
+  point_est    = format(round(exp(ci_log[,"fit"])), big.mark=","),
+  CI_width_DKK = format(round(ci_widths), big.mark=","),
+  PI_width_DKK = format(round(pi_widths), big.mark=","),
+  PI_CI_ratio  = round(pi_widths / ci_widths, 1)
+)
+knitr::kable(width_tbl,
+             col.names = c("sqm","Point est (DKK)",
+                           "CI width (DKK)","PI width (DKK)","PI/CI ratio"),
+             caption   = "Interval widths on DKK scale")
+```
+
+---
+
+# Plot: Predicted Price vs sqm
+
+```{r predict-plot}
+#| results: hold
+
+
+sqm_seq <- seq(60, 250, by = 2)
+new_seq <- data.frame(
+  log_sqm            = log(sqm_seq),
+  house_age          = 55,
+  nom_interest_rate. = 3.5,
+  dk_ann_infl_rate.  = 3.3
+)
+
+ci_seq <- predict(M_final, newdata = new_seq, interval = "confidence")
+pi_seq <- predict(M_final, newdata = new_seq, interval = "prediction")
+
+ylim_range <- range(exp(pi_seq[, c("lwr","upr")]))
+
+plot(sqm_seq, exp(ci_seq[,"fit"]),
+     type = "l", lwd = 2.5, col = "steelblue",
+     ylim = ylim_range,
+     main = "Predicted Price vs sqm — Copenhagen Villa\n(house_age=55, nom_rate=3.5%, infl=3.3%)",
+     xlab = "sqm",
+     ylab = "Price (DKK)")
+
+# CI band
+polygon(c(sqm_seq, rev(sqm_seq)),
+        c(exp(ci_seq[,"lwr"]), rev(exp(ci_seq[,"upr"]))),
+        col = rgb(0.27, 0.51, 0.71, 0.2), border = NA)
+
+# PI band
+polygon(c(sqm_seq, rev(sqm_seq)),
+        c(exp(pi_seq[,"lwr"]), rev(exp(pi_seq[,"upr"]))),
+        col = rgb(0.70, 0.13, 0.13, 0.1), border = NA)
+
+lines(sqm_seq, exp(ci_seq[,"lwr"]), lty = 2, col = "steelblue", lwd = 1.5)
+lines(sqm_seq, exp(ci_seq[,"upr"]), lty = 2, col = "steelblue", lwd = 1.5)
+lines(sqm_seq, exp(pi_seq[,"lwr"]), lty = 2, col = "firebrick", lwd = 1.5)
+lines(sqm_seq, exp(pi_seq[,"upr"]), lty = 2, col = "firebrick", lwd = 1.5)
+
+# Mark the three new houses
+points(exp(new_houses$log_sqm), exp(ci_log[,"fit"]),
+       pch = 16, cex = 1.4, col = "black")
+
+legend("topleft",
+       legend = c("Point estimate",
+                  "95% CI for mean (shaded)",
+                  "95% PI for single house (shaded)"),
+       col    = c("steelblue","steelblue","firebrick"),
+       lty    = c(1, 2, 2), lwd  = c(2.5, 1.5, 1.5),
+       bty    = "n", cex = 0.85)
+```
+
+---
+
+# Sensitivity to Interest Rate
+
+How does the predicted price change as `nom_interest_rate.` varies?
+
+```{r sensitivity}
+#| results: hold
+
+
+rates   <- seq(1.75, 3.6, by = 0.25)
+base_df <- data.frame(log_sqm            = log(130),
+                       house_age          = 55,
+                       nom_interest_rate. = rates,
+                       dk_ann_infl_rate.  = 3.3)
+
+preds <- predict(M_final, newdata = base_df, interval = "confidence")
+
+plot(rates, exp(preds[,"fit"]) / 1e6,
+     type = "b", pch = 16, col = "steelblue", lwd = 2,
+     main = "Predicted Price vs Nominal Interest Rate\n(130 sqm, age=55, infl=3.3%)",
+     xlab = "Nominal interest rate (%)",
+     ylab = "Predicted price (million DKK)")
+lines(rates, exp(preds[,"lwr"]) / 1e6, lty = 2, col = "steelblue")
+lines(rates, exp(preds[,"upr"]) / 1e6, lty = 2, col = "steelblue")
+
+cat("Price at 1.75% rate:", format(round(exp(preds[1,"fit"])), big.mark=","), "DKK\n")
+cat("Price at 3.60% rate:", format(round(exp(preds[nrow(preds),"fit"])), big.mark=","), "DKK\n")
+cat("Difference:         ", format(round(exp(preds[1,"fit"]) -
+                                         exp(preds[nrow(preds),"fit"])),
+                                   big.mark=","), "DKK\n")
+```
+
+---
+
+# Interpretation
+
+**CI vs PI — the key distinction:**
+
+A CI for the mean answers: *"What is the typical price of all 130 sqm villas with these characteristics?"* The CI narrows as $n \to \infty$ because we learn the mean precisely.
+
+A PI for a new house answers: *"What will this specific house sell for?"*
+The PI never collapses to a point because individual transactions always
+carry irreducible noise $\sigma^2$, no matter how large the dataset.
+
+**Back-transformation note:** the intervals are symmetric on the log scale but asymmetric on the DKK scale (wider above the point estimate than below), correctly reflecting the log-normal structure of prices.

@@ -1,0 +1,144 @@
+---
+title: "Step 1: One-Sample Inference on Mean Log-Price"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4, fig.width = 7)
+```
+
+```{r load}
+library(tidyverse)
+dk_villa <- readRDS("../../data/dk_villa.rds")
+cat("n =", nrow(dk_villa), "\n")
+```
+
+---
+
+# Statistical Model
+
+We model the log-prices of Copenhagen Villas (2023–2024) as:
+
+$$Y_i \sim \mathcal{N}(\mu, \sigma^2), \quad i = 1, \ldots, n \quad \text{(independent)}$$
+
+With a single sample there is only one variance — no homogeneity test is
+applicable. The only distributional assumption to verify is normality.
+
+---
+
+# Normality Check
+
+```{r normality}
+#| results: hold
+
+
+par(mfrow = c(1, 2))
+
+hist(dk_villa$log_price,
+     breaks = 30, prob = TRUE,
+     main   = "log(Price) — histogram",
+     xlab   = "log(Price)",
+     col    = "lightsteelblue", border = "white")
+curve(dnorm(x, mean(dk_villa$log_price), sd(dk_villa$log_price)),
+      add = TRUE, col = "firebrick", lwd = 2)
+
+qqnorm(dk_villa$log_price,
+       main = "QQ plot — log(Price)",
+       pch = 16, cex = 0.6, col = "steelblue")
+qqline(dk_villa$log_price, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Hypothesis Test
+
+We test whether the mean log-price is consistent with a benchmark of
+4,500,000 DKK:
+
+$$H_0: \mu = \log(4{,}500{,}000) \approx 15.32
+\quad \text{vs} \quad
+H_1: \mu \neq \log(4{,}500{,}000)$$
+
+Under $H_0$ the test statistic is:
+
+$$T = \frac{\bar{Y} - \mu_0}{S / \sqrt{n}} \sim t(n-1)$$
+
+```{r test-manual}
+#| results: hold
+
+
+mu0  <- log(4500000)
+n    <- nrow(dk_villa)
+ybar <- mean(dk_villa$log_price)
+s    <- sd(dk_villa$log_price)
+df   <- n - 1
+
+t_stat <- (ybar - mu0) / (s / sqrt(n))
+p_val  <- 2 * pt(-abs(t_stat), df = df)
+ci     <- ybar + c(-1, 1) * qt(0.975, df) * s / sqrt(n)
+
+cat("n           =", n,                    "\n")
+cat("y-bar       =", round(ybar,   4),     "\n")
+cat("s           =", round(s,      4),     "\n")
+cat("mu0         =", round(mu0,    4),     "\n")
+cat("t-statistic =", round(t_stat, 4), "on", df, "df\n")
+cat("p-value     =", round(p_val,  6),     "\n")
+cat("95% CI for mu:             [", round(ci, 4), "]\n")
+cat("Back-transformed CI (DKK): [",
+    format(round(exp(ci)), big.mark = ","), "]\n")
+```
+
+```{r test-builtin}
+# Built-in verification
+t.test(dk_villa$log_price, mu = mu0)
+```
+
+---
+
+# Confidence Interval for $\sigma$
+
+A $95\%$ CI for $\sigma$ uses the fact that
+$(n-1)S^2/\sigma^2 \sim \chi^2(n-1)$:
+
+$$\left[\sqrt{\frac{(n-1)S^2}{\chi^2_{0.975}(n-1)}},\;
+         \sqrt{\frac{(n-1)S^2}{\chi^2_{0.025}(n-1)}}\right]$$
+
+```{r ci-sigma}
+#| results: hold
+
+
+ci_sigma <- sqrt(c(
+  (n - 1) * s^2 / qchisq(0.975, df),
+  (n - 1) * s^2 / qchisq(0.025, df)
+))
+cat("95% CI for sigma: [", round(ci_sigma, 4), "]\n")
+```
+
+---
+
+# Interpretation
+
+**On the log scale:** the CI for $\mu$ gives the range of plausible mean
+log-prices.
+
+**On the DKK scale:** back-transforming via $\exp(\cdot)$ yields a CI for the **median** price (not the mean), because for log-normal $Y$:
+$\exp\!\bigl(\mathbb{E}[\log Y]\bigr) = \text{median}(Y)$.
+
+This is more informative for skewed price data, where the median is a more representative summary than the mean.

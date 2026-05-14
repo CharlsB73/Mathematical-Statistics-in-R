@@ -1,0 +1,204 @@
+---
+title: "Step 4: Two-Way ANOVA (House Type * Area)"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4.5, fig.width = 8)
+```
+
+```{r load}
+#| results: hold
+
+
+library(tidyverse)
+dk_clean <- readRDS("../../data/dk_clean.rds")
+
+# Restrict to 4 areas for a balanced comparison
+dk_anova <- dk_clean %>%
+  filter(area %in% c("Capital, Copenhagen", "North Zealand",
+                     "East & mid jutland",  "South jutland")) %>%
+  droplevels()
+
+cat("Observations per cell (house_type × area):\n")
+print(table(dk_anova$house_type, dk_anova$area))
+```
+
+---
+
+# Statistical Model: Five-Model Hierarchy
+
+With row factor = house type ($r = 4$ levels) and column factor = area
+($s = 4$ levels):
+
+**M1 (interaction):**
+$X_{ijk} \sim \mathcal{N}(\mu_{ij}, \sigma^2)$
+
+**M2 (additive):**
+$X_{ijk} \sim \mathcal{N}(\alpha_i + \beta_j, \sigma^2)$
+
+**M3r (row only):**
+$X_{ijk} \sim \mathcal{N}(\alpha_i, \sigma^2)$
+
+**M3c (column only):**
+$X_{ijk} \sim \mathcal{N}(\beta_j, \sigma^2)$
+
+**$M_{\infty}$ (common mean):**
+$X_{ijk} \sim \mathcal{N}(\mu, \sigma^2)$
+
+---
+
+# Variance Homogeneity: Bartlett's Test on Cells
+
+For two-way ANOVA the relevant groups are the **crossed cells** (type × area). The course requires `interaction()` to define them correctly — the colon
+operator alone does not work for `bartlett.test`.
+
+```{r bartlett}
+#| results: hold
+
+
+cat("Per-cell standard deviations:\n")
+cell_sds <- tapply(dk_anova$log_price,
+                   interaction(dk_anova$house_type, dk_anova$area), sd)
+print(round(sort(cell_sds), 3))
+
+cat("\nMax / Min SD ratio:", round(max(cell_sds) / min(cell_sds), 2), "\n\n")
+
+cat("--- Bartlett's test on cells ---\n")
+bartlett.test(log_price ~ interaction(house_type, area), data = dk_anova)
+
+cat("\nSame large-n caveat as Step 3: check the ratio above.\n")
+```
+
+---
+
+# Interaction Plot
+
+Parallel lines indicate no interaction (additive model adequate).
+Non-parallel lines suggest the area effect differs by house type.
+
+```{r interaction-plot, fig.height=5}
+#| results: hold
+
+
+interaction.plot(
+  x.factor     = dk_anova$area,
+  trace.factor = dk_anova$house_type,
+  response     = dk_anova$log_price,
+  col          = c("steelblue","firebrick","forestgreen","darkorange"),
+  lty          = 1, lwd = 2,
+  main         = "Interaction Plot: Area × House Type",
+  xlab         = "Area",
+  ylab         = "Mean log(Price)",
+  trace.label  = "House type",
+  las          = 2
+)
+```
+
+---
+
+# Model Fitting and Tests
+
+## Test 1: Can we remove the interaction? (M1 → M2)
+
+$$H_0: \mu_{ij} = \alpha_i + \beta_j \text{ for all } i, j
+\quad \text{vs} \quad H_1: \text{interaction present}$$
+
+```{r m1-m2}
+#| results: hold
+
+
+M1_2way <- lm(log_price ~ house_type * area, data = dk_anova)
+M2_2way <- lm(log_price ~ house_type + area, data = dk_anova)
+
+cat("--- F-test: M2 vs M1 (remove interaction) ---\n")
+anova(M2_2way, M1_2way)
+```
+
+## Test 2: House type effect? (M3c → M2)
+
+$$H_0: \alpha_1 = \alpha_2 = \alpha_3 = \alpha_4
+\quad \text{(no house type effect given additive model)}$$
+
+```{r m3c-m2}
+#| results: hold
+
+
+M3c_2 <- lm(log_price ~ area, data = dk_anova)
+
+cat("--- F-test: M3c vs M2 (house_type effect) ---\n")
+anova(M3c_2, M2_2way)
+```
+
+## Test 3: Area effect? (M3r → M2)
+
+$$H_0: \beta_1 = \beta_2 = \beta_3 = \beta_4
+\quad \text{(no area effect given additive model)}$$
+
+```{r m3r-m2}
+#| results: hold
+
+
+M3r_2 <- lm(log_price ~ house_type, data = dk_anova)
+
+cat("--- F-test: M3r vs M2 (area effect) ---\n")
+anova(M3r_2, M2_2way)
+```
+
+---
+
+# Additive Model: Summary
+
+```{r m2-summary}
+#| results: hold
+
+
+summary(M2_2way)
+
+cat("\nResidual sigma s =", round(summary(M2_2way)$sigma, 4), "\n")
+```
+
+---
+
+# Cell Mean Estimates (Additive Model)
+
+```{r cell-means}
+#| results: hold
+
+
+# Reconstruct fitted means for each cell
+grid <- expand.grid(
+  house_type = levels(dk_anova$house_type),
+  area       = levels(dk_anova$area)
+)
+grid$fitted_log <- predict(M2_2way, newdata = grid)
+grid$fitted_dkk <- round(exp(grid$fitted_log))
+
+cat("Fitted median prices (DKK) under additive model:\n")
+mat <- matrix(format(grid$fitted_dkk, big.mark = ","),
+              nrow = 4, ncol = 4,
+              dimnames = list(levels(dk_anova$house_type),
+                              levels(dk_anova$area)))
+print(mat)
+```
+
+---
+
+# Interpretation
+
+The additive model is appropriate if the interaction test is not significant,meaning the **price premium of one house type over another is the same across all areas**. If interaction is significant, each type × area combination needs its own mean, and the simpler additive story breaks down.

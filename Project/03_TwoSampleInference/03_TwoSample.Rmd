@@ -1,0 +1,175 @@
+---
+title: "Step 2: Two-Sample Comparison (2023 vs 2024)"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4, fig.width = 7)
+```
+
+```{r load}
+#| results: hold
+
+
+library(tidyverse)
+dk_villa <- readRDS("../../data/dk_villa.rds") %>%
+  mutate(year = as.integer(substr(date, 1, 4)))
+
+y2023 <- dk_villa$log_price[dk_villa$year == 2023]
+y2024 <- dk_villa$log_price[dk_villa$year == 2024]
+
+cat("n_2023 =", length(y2023), "| n_2024 =", length(y2024), "\n")
+```
+
+---
+
+# Motivation
+
+Danish nominal interest rates rose sharply from 2022 onward.
+We ask: does this translate into a statistically detectable difference in
+mean log-price between 2023 and 2024 Copenhagen Villas?
+
+---
+
+# Statistical Model
+
+$$Y_{ij} \sim \mathcal{N}(\mu_j, \sigma^2),
+\quad j \in \{2023, 2024\}, \quad i = 1, \ldots, n_j
+\quad \text{(independent)}$$
+
+---
+
+# Variance Homogeneity — F-test
+
+The course (§2, slides 4) prescribes the **F-test** for exactly $m = 2$ variance
+estimates:
+
+$$H_{0\sigma^2}: \sigma_{2023}^2 = \sigma_{2024}^2$$
+
+$$F = \frac{S_{2023}^2}{S_{2024}^2} \sim F(n_1 - 1,\; n_2 - 1)
+\quad \text{under } H_{0\sigma^2}$$
+
+```{r var-test}
+#| results: hold
+
+
+cat("Per-group SDs:\n")
+cat("  2023:", round(sd(y2023), 4), "\n")
+cat("  2024:", round(sd(y2024), 4), "\n\n")
+
+vt <- var.test(y2023, y2024)
+print(vt)
+
+use_equal_var <- vt$p.value > 0.05
+cat("\nConclusion: using equal variances =", use_equal_var, "\n")
+```
+
+---
+
+# Exploratory Plots
+
+```{r plots}
+#| results: hold
+
+
+par(mfrow = c(1, 2))
+
+boxplot(log_price ~ year, data = dk_villa,
+        col  = c("lightsteelblue", "lightcoral"),
+        main = "log(Price) by Year",
+        xlab = "Year", ylab = "log(Price)")
+
+plot(density(y2023), col = "steelblue", lwd = 2,
+     xlim = range(dk_villa$log_price),
+     main = "Density: 2023 vs 2024", xlab = "log(Price)")
+lines(density(y2024), col = "firebrick", lwd = 2)
+legend("topright", legend = c("2023","2024"),
+       col = c("steelblue","firebrick"), lwd = 2, bty = "n")
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Two-Sample t-Test
+
+## Hypothesis
+
+$$H_0: \mu_{2023} = \mu_{2024}
+\quad \text{vs} \quad
+H_1: \mu_{2023} \neq \mu_{2024}$$
+
+## Test statistic (pooled variance)
+
+$$T = \frac{\bar{Y}_1 - \bar{Y}_2}{S_p\sqrt{1/n_1 + 1/n_2}}
+\sim t(n_1 + n_2 - 2)
+\quad \text{where } S_p^2 = \frac{(n_1-1)S_1^2 + (n_2-1)S_2^2}{n_1+n_2-2}$$
+
+```{r ttest-manual}
+#| results: hold
+
+
+n1  <- length(y2023);  n2  <- length(y2024)
+sp2 <- ((n1-1)*var(y2023) + (n2-1)*var(y2024)) / (n1 + n2 - 2)
+df  <- n1 + n2 - 2
+
+t_stat <- (mean(y2023) - mean(y2024)) / sqrt(sp2 * (1/n1 + 1/n2))
+p_val  <- 2 * pt(-abs(t_stat), df = df)
+ci     <- (mean(y2023) - mean(y2024)) +
+           c(-1, 1) * qt(0.975, df) * sqrt(sp2 * (1/n1 + 1/n2))
+
+cat("mean_2023   =", round(mean(y2023), 4), "\n")
+cat("mean_2024   =", round(mean(y2024), 4), "\n")
+cat("sp          =", round(sqrt(sp2),   4), "\n")
+cat("t-statistic =", round(t_stat, 4), "on", df, "df\n")
+cat("p-value     =", round(p_val,  6), "\n")
+cat("95% CI for (mu_2023 - mu_2024): [", round(ci, 4), "]\n")
+cat("Back-transformed ratio CI: [",
+    round(exp(ci), 4), "]\n")
+```
+
+```{r ttest-builtin}
+t.test(y2023, y2024, var.equal = use_equal_var)
+```
+
+---
+
+# Normality Check per Group
+
+```{r normality}
+#| results: hold
+
+
+par(mfrow = c(1, 2))
+
+qqnorm(y2023, main = "QQ — 2023",
+       pch = 16, cex = 0.6, col = "steelblue")
+qqline(y2023, col = "firebrick", lwd = 2)
+
+qqnorm(y2024, main = "QQ — 2024",
+       pch = 16, cex = 0.6, col = "steelblue")
+qqline(y2024, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Interpretation
+
+The back-transformed CI for $(\mu_{2023} - \mu_{2024})$ is on the log scale. Exponentiating gives a ratio: $\exp(\bar{Y}_{2023} - \bar{Y}_{2024})$ is the multiplicative factor by which the 2023 median price exceeds the 2024 median. A value above 1 means prices were higher in 2023; below 1 means lower.

@@ -1,0 +1,201 @@
+---
+title: "Step 7: Cross-Validation (LOOCV)"
+subtitle: "Danish Housing Prices · Mathematical Statistics"
+author: "Carlos Castillo"
+date: today
+format:
+  pdf:
+    pdf-engine: pdflatex  # El motor más rápido para PDF
+    papersize: a4         # Formato estándar en Dinamarca
+    number-sections: true
+    keep-tex: false       # No pierde tiempo guardando archivos basura
+execute:
+  cache: true             # Fundamental para velocidad en R
+  freeze: auto            # Evita re-renders innecesarios
+  echo: true              # Muestra tu código para el profesor
+  warning: false
+  results: hold           # Agrupa resultados para un renderizado más limpio
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.height = 4, fig.width = 7)
+```
+
+```{r load}
+#| results: hold
+
+
+library(tidyverse)
+dk_villa <- readRDS("../../data/dk_villa.rds")
+M_final  <- readRDS("../../data/M_final.rds")
+
+cat("Model formula:", deparse(formula(M_final)), "\n")
+cat("n =", nrow(dk_villa), "\n")
+```
+
+---
+
+# Motivation
+
+The training error $s(M)$ measures how well the model fits the data it was trained on. If the model is overfitted — i.e. too many predictors selected to match noise; $s(M)$ will be optimistically small and predictions on new data will be poor.
+
+**Leave-one-out cross-validation (LOOCV)** estimates prediction error on
+genuinely unseen data without requiring a separate holdout set.
+
+---
+
+# The LOOCV Formula 
+
+Naïvely, LOOCV requires refitting the model $n$ times. But we can follow a shortcut via the **hat matrix**:
+
+$$\tilde{e}_i = \frac{e_i}{1 - h_{ii}}$$
+
+where $e_i = Y_i - \hat{Y}_i$ is the ordinary residual and $h_{ii}$ is the $i$-th diagonal of the hat matrix $H = X(X^\top X)^{-1}X^\top$.
+
+The LOOCV estimate of $\sigma$ is then:
+
+$$s_{\text{cv}} = \sqrt{\frac{1}{n} \sum_{i=1}^n \tilde{e}_i^2}$$
+
+**Intuition for the shortcut:** $h_{ii}$ measures how much observation $i$ "pulls" the fitted line toward itself. Dividing by $(1 - h_{ii})$ inflates the residual to approximate what it would have been if $i$ had been left out during fitting. High-leverage points ($h_{ii}$ close to 1) get inflated most.
+
+---
+
+# Computation
+
+```{r loocv}
+#| results: hold
+
+
+h     <- hatvalues(M_final)
+e     <- residuals(M_final)
+e_loo <- e / (1 - h)
+
+s_M  <- summary(M_final)$sigma
+s_cv <- sqrt(mean(e_loo^2))
+
+cat("Training error:  s(M)  =", round(s_M,  5), "\n")
+cat("LOOCV error:     s_cv  =", round(s_cv, 5), "\n")
+cat("Ratio s_cv/s(M)       =", round(s_cv / s_M, 4), "\n\n")
+
+cat("Rule of thumb:\n")
+cat("  ratio ~ 1.0 : model generalises well\n")
+cat("  ratio >> 1.0: model is overfitting\n")
+```
+
+---
+
+# Leverage Diagnostics
+
+High-leverage observations ($h_{ii} > 2p/n$ where $p$ is the number of
+parameters) are worth examining — they disproportionately influence the fit.
+
+```{r leverage}
+#| results: hold
+
+
+p   <- length(coef(M_final))
+n   <- nrow(dk_villa)
+thr <- 2 * p / n
+
+cat("Leverage threshold 2p/n =", round(thr, 4), "\n")
+cat("Observations above threshold:", sum(h > thr), "\n\n")
+
+# Top 10 highest-leverage points
+top_lev <- order(h, decreasing = TRUE)[1:10]
+cat("Top 10 high-leverage observations:\n")
+print(data.frame(
+  obs        = top_lev,
+  leverage   = round(h[top_lev], 4),
+  loo_resid  = round(e_loo[top_lev], 4),
+  log_price  = round(dk_villa$log_price[top_lev], 4)
+))
+```
+
+---
+
+# LOOCV Residual Plot
+
+```{r loocv-plot}
+#| results: hold
+
+
+plot(fitted(M_final), e_loo,
+     pch = 16, cex = 0.6, col = rgb(0, 0, 0.6, 0.4),
+     main = "LOOCV Residuals vs Fitted Values",
+     xlab = "Fitted (log scale)", ylab = "LOOCV residual")
+abline(h =  0,       lty = 1)
+abline(h =  2*s_cv,  lty = 2, col = "firebrick")
+abline(h = -2*s_cv,  lty = 2, col = "firebrick")
+
+# Highlight high-leverage points
+points(fitted(M_final)[h > thr], e_loo[h > thr],
+       pch = 1, cex = 1.2, col = "darkorange", lwd = 2)
+legend("topright",
+       legend = c("Observations", "High leverage", "±2 s_cv"),
+       pch    = c(16, 1, NA),
+       lty    = c(NA, NA, 2),
+       col    = c(rgb(0,0,0.6,0.4), "darkorange", "firebrick"),
+       bty    = "n")
+```
+
+---
+
+# Comparison: Training Error vs LOOCV Error
+
+```{r compare-plot}
+#| results: hold
+
+
+# Distribution of ordinary vs LOOCV residuals
+par(mfrow = c(1, 2))
+
+hist(e, breaks = 30, prob = TRUE,
+     col = "lightsteelblue", border = "white",
+     main = "Ordinary residuals",
+     xlab = "Residual")
+curve(dnorm(x, 0, s_M), add = TRUE, col = "firebrick", lwd = 2)
+
+hist(e_loo, breaks = 30, prob = TRUE,
+     col = "lightcoral", border = "white",
+     main = "LOOCV residuals",
+     xlab = "LOOCV residual")
+curve(dnorm(x, 0, s_cv), add = TRUE, col = "firebrick", lwd = 2)
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Summary Table
+
+```{r summary}
+#| results: hold
+
+
+res_tbl <- data.frame(
+  Metric = c("s(M) — training error",
+             "s_cv — LOOCV error",
+             "Ratio s_cv / s(M)",
+             "Number of parameters p",
+             "n"),
+  Value  = c(round(s_M, 5),
+             round(s_cv, 5),
+             round(s_cv / s_M, 4),
+             p,
+             n)
+)
+knitr::kable(res_tbl, caption = "LOOCV summary")
+```
+
+**Interpretation on DKK scale:** Since the model is on the log scale, multiply $s_{\text{cv}}$ by the typical price to get an approximate absolute prediction error. For a 4.5M DKK villa: $4{,}500{,}000 \times (e^{s_{\text{cv}}} - 1) \approx$ prediction error in DKK.
+
+```{r dkk-error}
+#| results: hold
+
+
+median_price <- exp(mean(dk_villa$log_price))
+approx_error <- median_price * (exp(s_cv) - 1)
+cat("Approximate LOOCV prediction error (DKK):",
+    format(round(approx_error), big.mark = ","), "\n")
+```
